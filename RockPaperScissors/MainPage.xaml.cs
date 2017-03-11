@@ -29,6 +29,8 @@ using Windows.System.Display;
 using Windows.Graphics.Display;
 using Windows.Media.MediaProperties;
 
+using OpenCvSharp;
+
 // The Blank Page item template is documented at http://go.microsoft.com/fwlink/?LinkId=402352&clcid=0x409
 
 namespace RockPaperScissors
@@ -71,15 +73,38 @@ namespace RockPaperScissors
 
                 var capturedPhoto = await lowLagCapture.CaptureAsync();
                 var softwareBitmap = capturedPhoto.Frame.SoftwareBitmap;
-
                 await lowLagCapture.FinishAsync();
 
                 SoftwareBitmap softwareBitmapBGR8 = SoftwareBitmap.Convert(softwareBitmap,
                             BitmapPixelFormat.Bgra8,
                             BitmapAlphaMode.Premultiplied);
 
+                Mat mat = SoftwareBitmapToMat(softwareBitmapBGR8);
+
+                HandDetect detector = new HandDetect();
+
+                CascadeClassifier faceClassifier;
+
+                detector.myframe = mat;
+                var haarCascade = new CascadeClassifier("Assets\\filters\\haarcascade_frontalface_alt.xml");
+
+                // detect the hand
+                Vec3i minYCrCb, maxYCrCb;
+                Vec3i minRgb, maxRgb;
+
+                Rect? faceRegion = detector.FaceDetect(mat, haarCascade);
+                if (faceRegion.HasValue)
+                {
+                    detector.SkinColorModel(mat, faceRegion, out maxYCrCb, out minYCrCb);
+                    detector.HandDetection(mat, faceRegion, out maxRgb, out minRgb);
+                    detector.GetPalmCenter();
+                    detector.GetFingerTips();
+                }
+
+                
+                SoftwareBitmap result = MatToSoftwareBitmap(mat);
                 SoftwareBitmapSource bitmapSource = new SoftwareBitmapSource();
-                await bitmapSource.SetBitmapAsync(softwareBitmapBGR8);
+                await bitmapSource.SetBitmapAsync(result);
                 capture.Source = bitmapSource;
 
                 button.IsEnabled = true;
@@ -87,11 +112,33 @@ namespace RockPaperScissors
             }
         }
 
-    private async void button_Click(object sender, RoutedEventArgs e)
+        SoftwareBitmap MatToSoftwareBitmap(Mat image)
+        {
+            // Create the WriteableBitmap
+            SoftwareBitmap result = new SoftwareBitmap(BitmapPixelFormat.Bgra8, image.Cols, image.Rows, BitmapAlphaMode.Premultiplied);
+            
+            byte[] bytes = new byte[image.Cols * image.Rows * 4];
+
+            System.Runtime.InteropServices.Marshal.Copy(image.Data, bytes, 0, bytes.Length);
+            
+            result.CopyFromBuffer(bytes.AsBuffer());
+
+            return result;
+        }
+
+        Mat SoftwareBitmapToMat(SoftwareBitmap image)
+        {
+            byte[] bytes = new byte[image.PixelHeight * image.PixelWidth * 4];
+            image.CopyToBuffer(bytes.AsBuffer());
+            Mat result = new Mat(image.PixelHeight, image.PixelWidth, MatType.CV_8UC4, bytes);
+
+            return result;
+        }
+
+        private async void button_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-
                 _mediaCapture = new MediaCapture();
                 await _mediaCapture.InitializeAsync();
 
@@ -120,7 +167,6 @@ namespace RockPaperScissors
             {
                 System.Diagnostics.Debug.WriteLine("MediaCapture initialization failed. {0}", ex.Message);
             }
-
         }
     }
 }
