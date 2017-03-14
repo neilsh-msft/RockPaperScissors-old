@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading;
-using Windows.Foundation;
+// using Windows.Foundation;
 using Windows.Foundation.Collections;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -51,6 +51,9 @@ namespace RockPaperScissors
             this.InitializeComponent();
             _dispatcherTimer = new DispatcherTimer();
             _dispatcherTimer.Tick += dispatcherTimer_Tick;
+
+            // Just always run for now.
+            button_Click(null, null);
         }
 
         private void MediaCapture_Failed(MediaCapture sender, MediaCaptureFailedEventArgs errorEventArgs)
@@ -81,34 +84,47 @@ namespace RockPaperScissors
 
                 Mat mat = SoftwareBitmapToMat(softwareBitmapBGR8);
 
-                HandDetect detector = new HandDetect();
+                HandDetect detector = new HandDetect(mat);
 
                 CascadeClassifier faceClassifier;
 
-                detector.myframe = mat;
                 var haarCascade = new CascadeClassifier("Assets\\filters\\haarcascade_frontalface_alt.xml");
 
                 // detect the hand
                 Vec3i minYCrCb, maxYCrCb;
-                Vec3i minRgb, maxRgb;
-
+                
                 Rect? faceRegion = detector.FaceDetect(mat, haarCascade);
                 if (faceRegion.HasValue)
                 {
-                    detector.SkinColorModel(mat, faceRegion, out maxYCrCb, out minYCrCb);
-                    detector.HandDetection(mat, faceRegion, out maxRgb, out minRgb);
+                    Mat mask;
+
+                    detector.SkinColorModel(mat, faceRegion.Value, out maxYCrCb, out minYCrCb);
+                    mask = detector.HandDetection(mat, faceRegion.Value, maxYCrCb, minYCrCb);
                     detector.GetPalmCenter();
                     detector.GetFingerTips();
-                }
 
-                
-                SoftwareBitmap result = MatToSoftwareBitmap(mat);
-                SoftwareBitmapSource bitmapSource = new SoftwareBitmapSource();
-                await bitmapSource.SetBitmapAsync(result);
-                capture.Source = bitmapSource;
+                    SoftwareBitmap result = MatToSoftwareBitmap(detector.myframe);
+                    SoftwareBitmapSource bitmapSource = new SoftwareBitmapSource();
+                    await bitmapSource.SetBitmapAsync(result);
+                    capture.Source = bitmapSource;
+
+                    mask1.Source = new SoftwareBitmapSource();
+                    await ((SoftwareBitmapSource)mask1.Source).SetBitmapAsync(MatToSoftwareBitmap(detector.mask1));
+
+                    mask2.Source = new SoftwareBitmapSource();
+                    await ((SoftwareBitmapSource)mask2.Source).SetBitmapAsync(MatToSoftwareBitmap(detector.mask2));
+
+                    mask3.Source = new SoftwareBitmapSource();
+                    await ((SoftwareBitmapSource)mask3.Source).SetBitmapAsync(MatToSoftwareBitmap(detector.mask3));
+
+                    mask4.Source = new SoftwareBitmapSource();
+                    await ((SoftwareBitmapSource)mask4.Source).SetBitmapAsync(MatToSoftwareBitmap(detector.mask4));
+                }
 
                 button.IsEnabled = true;
                 button.Content = "Play";
+
+                _dispatcherTimer.Start();
             }
         }
 
@@ -116,11 +132,21 @@ namespace RockPaperScissors
         {
             // Create the WriteableBitmap
             SoftwareBitmap result = new SoftwareBitmap(BitmapPixelFormat.Bgra8, image.Cols, image.Rows, BitmapAlphaMode.Premultiplied);
-            
             byte[] bytes = new byte[image.Cols * image.Rows * 4];
+            if (image.Type() == MatType.CV_8UC4)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(image.Data, bytes, 0, bytes.Length);
+            }
+            else if (image.Type() == MatType.CV_8UC1)
+            {
+                Mat C255 = new Mat(image.Size(), MatType.CV_8UC1, new Scalar(255));
+                Mat temp = new Mat(image.Size(), MatType.CV_8UC4);
 
-            System.Runtime.InteropServices.Marshal.Copy(image.Data, bytes, 0, bytes.Length);
-            
+                Mat[] channels = { image, image, image, C255 };
+                Cv2.Merge(channels, temp);
+                
+                System.Runtime.InteropServices.Marshal.Copy(temp.Data, bytes, 0, bytes.Length);
+            }
             result.CopyFromBuffer(bytes.AsBuffer());
 
             return result;
